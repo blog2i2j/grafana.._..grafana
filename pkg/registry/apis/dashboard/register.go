@@ -39,6 +39,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/dashboards"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/services/folder"
+	"github.com/grafana/grafana/pkg/services/librarypanels"
 	"github.com/grafana/grafana/pkg/services/provisioning"
 	"github.com/grafana/grafana/pkg/services/quota"
 	"github.com/grafana/grafana/pkg/services/search/sort"
@@ -110,6 +111,7 @@ func RegisterAPIService(
 	sorter sort.Service,
 	quotaService quota.Service,
 	folderStore folder.FolderStore,
+	libraryPanelSvc librarypanels.Service,
 	restConfigProvider apiserver.RestConfigProvider,
 	userService user.Service,
 ) *DashboardsAPIBuilder {
@@ -137,7 +139,7 @@ func RegisterAPIService(
 		folderClient:                 folderClient,
 
 		legacy: &DashboardStorage{
-			Access:           legacy.NewDashboardAccess(dbp, namespacer, dashStore, provisioning, sorter),
+			Access:           legacy.NewDashboardAccess(dbp, namespacer, dashStore, provisioning, libraryPanelSvc, sorter),
 			DashboardService: dashboardService,
 		},
 		reg: reg,
@@ -332,7 +334,7 @@ func (b *DashboardsAPIBuilder) validateUpdate(ctx context.Context, a admission.A
 	}
 
 	// Validate folder existence if specified and changed
-	if !a.IsDryRun() && newAccessor.GetFolder() != oldAccessor.GetFolder() {
+	if !a.IsDryRun() && newAccessor.GetFolder() != oldAccessor.GetFolder() && newAccessor.GetFolder() != "" {
 		id, err := identity.GetRequester(ctx)
 		if err != nil {
 			return fmt.Errorf("error getting requester: %w", err)
@@ -350,16 +352,6 @@ func (b *DashboardsAPIBuilder) validateUpdate(ctx context.Context, a admission.A
 	// Validate refresh interval
 	if err := b.dashboardService.ValidateDashboardRefreshInterval(b.cfg.MinRefreshInterval, refresh); err != nil {
 		return apierrors.NewBadRequest(err.Error())
-	}
-
-	allowOverwrite := false // TODO: Add support for overwrite flag
-	// check for is someone else has written in between
-	if newAccessor.GetGeneration() != oldAccessor.GetGeneration() {
-		if allowOverwrite {
-			newAccessor.SetGeneration(oldAccessor.GetGeneration())
-		} else {
-			return apierrors.NewBadRequest(dashboards.ErrDashboardVersionMismatch.Error())
-		}
 	}
 
 	return nil
